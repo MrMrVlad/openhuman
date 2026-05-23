@@ -263,6 +263,23 @@ CREATE TABLE IF NOT EXISTS mem_tree_summary_reembed_skipped (
 CREATE INDEX IF NOT EXISTS idx_mem_tree_summary_reembed_skipped_model
     ON mem_tree_summary_reembed_skipped(model_signature);
 
+-- Append-only audit log for successful/failed MCP write tools (#2536).
+-- Metadata only — document bodies live in the memory doc store.
+CREATE TABLE IF NOT EXISTS mcp_writes (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_ms        INTEGER NOT NULL,
+    client_info         TEXT    NOT NULL,
+    tool_name           TEXT    NOT NULL,
+    args_summary        TEXT,
+    resulting_chunk_id  TEXT,
+    success             INTEGER NOT NULL,
+    error_message       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_writes_timestamp ON mcp_writes (timestamp_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_writes_client    ON mcp_writes (client_info);
+CREATE INDEX IF NOT EXISTS idx_mcp_writes_tool      ON mcp_writes (tool_name);
+
 -- `mem_tree_buffers` holds the unsealed frontier per (tree, level). One row
 -- per active level per tree; deleted when the buffer seals (clears) in the
 -- same transaction as the new summary node row.

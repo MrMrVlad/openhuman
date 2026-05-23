@@ -194,6 +194,7 @@ fn build_registered_controllers() -> Vec<RegisteredController> {
     );
     // Per-connection memory sync status, controls, and progress (#1136)
     controllers.extend(crate::openhuman::memory::all_memory_sync_status_registered_controllers());
+    controllers.extend(crate::openhuman::memory::all_mcp_audit_registered_controllers());
     // Link shortener for long tracking URLs — saves LLM tokens
     controllers
         .extend(crate::openhuman::redirect_links::all_redirect_links_registered_controllers());
@@ -320,6 +321,7 @@ fn build_declared_controller_schemas() -> Vec<ControllerSchema> {
         crate::openhuman::composio::providers::slack::all_slack_memory_controller_schemas(),
     );
     schemas.extend(crate::openhuman::memory::all_memory_sync_status_controller_schemas());
+    schemas.extend(crate::openhuman::memory::all_mcp_audit_controller_schemas());
     schemas.extend(crate::openhuman::redirect_links::all_redirect_links_controller_schemas());
     schemas.extend(crate::openhuman::referral::all_referral_controller_schemas());
     schemas.extend(crate::openhuman::billing::all_billing_controller_schemas());

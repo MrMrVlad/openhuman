@@ -9,6 +9,7 @@ pub mod chunker;
 pub mod conversations;
 pub mod global;
 pub mod ingestion;
+pub mod mcp_audit;
 pub mod ops;
 pub mod preferences;
 pub mod rpc_models;
@@ -25,6 +26,9 @@ pub use ingestion::{
     ExtractedEntity, ExtractedRelation, ExtractionMode, IngestionJob, IngestionQueue,
     IngestionState, IngestionStatusSnapshot, MemoryIngestionConfig, MemoryIngestionRequest,
     MemoryIngestionResult, DEFAULT_MEMORY_EXTRACTION_MODEL,
+};
+pub use mcp_audit::{
+    all_mcp_audit_controller_schemas, all_mcp_audit_registered_controllers, McpWriteRecord,
 };
 pub use ops as rpc;
 pub use ops::*;

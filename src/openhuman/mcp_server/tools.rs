@@ -543,7 +543,11 @@ fn list_tools_result_from_specs(specs: Vec<McpToolSpec>) -> Value {
     json!({ "tools": tools })
 }
 
-pub async fn call_tool(name: &str, arguments: Value) -> Result<Value, ToolCallError> {
+pub async fn call_tool(
+    name: &str,
+    arguments: Value,
+    client_source_type: &str,
+) -> Result<Value, ToolCallError> {
     let spec = tool_specs()
         .into_iter()
         .find(|tool| tool.name == name)
@@ -573,7 +577,7 @@ pub async fn call_tool(name: &str, arguments: Value) -> Result<Value, ToolCallEr
         "memory.store" | "memory.note" | "tree.tag" => {
             enforce_write_policy(spec.name).await?;
             validate_controller_params(&spec, &params)?;
-            return dispatch_write_tool(spec.name, &params).await;
+            return dispatch_write_tool(spec.name, &params, client_source_type).await;
         }
         _ => {}
     }
@@ -1169,49 +1173,113 @@ async fn enforce_write_policy(tool_name: &str) -> Result<(), ToolCallError> {
 async fn dispatch_write_tool(
     tool_name: &str,
     params: &Map<String, Value>,
+    client_source_type: &str,
 ) -> Result<Value, ToolCallError> {
     let rpc_method = "openhuman.memory_doc_put";
+    let config = load_config_and_init_registry().await?;
+    let args_summary = crate::openhuman::memory::mcp_audit::summarize_write_args(tool_name, params);
+    let timestamp_ms = chrono::Utc::now().timestamp_millis();
 
     tracing::info!(
         tool = tool_name,
         rpc_method = rpc_method,
-        client = "mcp",
+        client = client_source_type,
         "[mcp_server] write dispatch"
     );
 
-    match all::try_invoke_registered_rpc(rpc_method, params.clone()).await {
+    let outcome = all::try_invoke_registered_rpc(rpc_method, params.clone()).await;
+
+    match outcome {
         Some(Ok(value)) => {
             let document_id = value
                 .get("document_id")
                 .and_then(Value::as_str)
-                .unwrap_or("<unknown>");
+                .map(str::to_string);
+            record_mcp_write_best_effort(
+                &config,
+                crate::openhuman::memory::mcp_audit::NewMcpWriteRecord {
+                    timestamp_ms,
+                    client_info: client_source_type.to_string(),
+                    tool_name: tool_name.to_string(),
+                    args_summary,
+                    resulting_chunk_id: document_id.clone(),
+                    success: true,
+                    error_message: None,
+                },
+            );
             tracing::info!(
                 tool = tool_name,
-                chunk_id = document_id,
-                client = "mcp",
+                chunk_id = document_id.as_deref().unwrap_or("<unknown>"),
+                client = client_source_type,
                 "[mcp_server] write success"
             );
             Ok(tool_success(value))
         }
         Some(Err(message)) => {
+            record_mcp_write_best_effort(
+                &config,
+                crate::openhuman::memory::mcp_audit::NewMcpWriteRecord {
+                    timestamp_ms,
+                    client_info: client_source_type.to_string(),
+                    tool_name: tool_name.to_string(),
+                    args_summary,
+                    resulting_chunk_id: None,
+                    success: false,
+                    error_message: Some(message.clone()),
+                },
+            );
             log::warn!(
-                "[mcp_server] write handler error tool={} error={}",
+                "[mcp_server] write handler error tool={} client={} error={}",
                 tool_name,
+                client_source_type,
                 message
             );
             Ok(tool_error(format!("{} failed: {message}", tool_name)))
         }
         None => {
+            let message = format!(
+                "{} is unavailable: mapped RPC method `{rpc_method}` is not registered",
+                tool_name
+            );
+            record_mcp_write_best_effort(
+                &config,
+                crate::openhuman::memory::mcp_audit::NewMcpWriteRecord {
+                    timestamp_ms,
+                    client_info: client_source_type.to_string(),
+                    tool_name: tool_name.to_string(),
+                    args_summary,
+                    resulting_chunk_id: None,
+                    success: false,
+                    error_message: Some(message.clone()),
+                },
+            );
             log::error!(
                 "[mcp_server] write mapping missing registered RPC method tool={} rpc_method={}",
                 tool_name,
                 rpc_method
             );
-            Ok(tool_error(format!(
-                "{} is unavailable: mapped RPC method `{}` is not registered",
-                tool_name, rpc_method
-            )))
+            Ok(tool_error(message))
         }
+    }
+}
+
+fn record_mcp_write_best_effort(
+    config: &crate::openhuman::config::Config,
+    record: crate::openhuman::memory::mcp_audit::NewMcpWriteRecord,
+) {
+    if let Err(err) = crate::openhuman::memory::mcp_audit::insert_mcp_write(config, &record) {
+        log::warn!(
+            "[mcp_server] failed to persist MCP write audit tool={} client={}: {err}",
+            record.tool_name,
+            record.client_info
+        );
+    } else {
+        log::debug!(
+            "[memory_tree::store] mcp_write audit tool={} client={} success={}",
+            record.tool_name,
+            record.client_info,
+            record.success
+        );
     }
 }
 
